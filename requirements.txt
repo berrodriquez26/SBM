@@ -4,3 +4,4 @@ python-dotenv
 aiohttp
 fastapi
 uvicorn[standard]
+pandas

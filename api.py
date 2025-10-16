@@ -9,7 +9,9 @@ import os
 from main import (
     APIKeyManager,
     ResultadoExpediente,
-    procesar_expedientes_concurrente
+    procesar_expedientes_concurrente,
+    InfoExpedienteCSV,
+    buscar_expedientes_en_csv
 )
 
 # Cargar variables de entorno
@@ -23,6 +25,14 @@ class ExpedienteRequest(BaseModel):
     """Modelo para el request de procesamiento de expedientes"""
     urls: List[str] = Field(
         description="Lista de URLs de expedientes a procesar",
+        min_length=1
+    )
+
+
+class BusquedaExpedientesRequest(BaseModel):
+    """Request para buscar expedientes en CSV"""
+    ids_expedientes: List[str] = Field(
+        description="Lista de IDs de expedientes a buscar",
         min_length=1
     )
 
@@ -83,6 +93,7 @@ async def root():
         "version": "1.0.0",
         "endpoints": {
             "POST /procesar-expedientes": "Procesar lista de URLs de expedientes",
+            "POST /buscar-expedientes": "Buscar expedientes por ID en CSV",
             "GET /health": "Verificar estado de la API"
         }
     }
@@ -140,6 +151,36 @@ async def procesar_expedientes(request: ExpedienteRequest):
         raise HTTPException(status_code=500, detail=f"Error procesando expedientes: {str(e)}")
 
 
+@app.post("/buscar-expedientes", response_model=List[InfoExpedienteCSV])
+async def buscar_expedientes(request: BusquedaExpedientesRequest):
+    """
+    Busca expedientes en CSV remoto por sus IDs
+    
+    Args:
+        request: BusquedaExpedientesRequest con lista de IDs
+    
+    Returns:
+        Lista de InfoExpedienteCSV con información encontrada
+    """
+    
+    # URL del CSV en GitHub
+    URL_CSV = "https://raw.githubusercontent.com/berrodriquez26/SBM/refs/heads/main/data/expedientes.csv"
+    
+    try:
+        # Buscar expedientes en el CSV
+        resultados = await buscar_expedientes_en_csv(
+            ids_expedientes=request.ids_expedientes,
+            url_csv=URL_CSV
+        )
+        
+        return resultados
+        
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error buscando expedientes: {str(e)}")
+
+
 # ============================================================================
 # PUNTO DE ENTRADA
 # ============================================================================
@@ -152,6 +193,6 @@ if __name__ == "__main__":
         "api:app",
         host="0.0.0.0",
         port=8001,
-        reload=True
+        reload=False
     )
 

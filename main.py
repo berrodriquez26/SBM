@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import List
+from typing import List, Dict
 from datetime import datetime
 from dotenv import load_dotenv
 import asyncio
@@ -7,6 +7,8 @@ import aiohttp
 import json
 import os
 import re
+import pandas as pd
+from io import StringIO
 
 # Cargar variables de entorno desde archivo .env
 load_dotenv()
@@ -33,6 +35,20 @@ class ResultadoExpediente(BaseModel):
     acuerdos_recientes: List[Acuerdo] = Field(
         description="Los 3 acuerdos más recientes, ordenados del más reciente al más antiguo"
     )
+
+
+class InfoExpedienteCSV(BaseModel):
+    """Información de un expediente desde el CSV"""
+    num_expediente: str = Field(description="Número del expediente")
+    parte_actora: str = Field(description="Parte actora del expediente")
+    parte_demandada: str = Field(description="Parte demandada del expediente")
+    parte_notificada: str = Field(description="Parte notificada del expediente")
+    fecha_actuacion: str = Field(description="Fecha de actuación")
+    sintesis: str = Field(description="Síntesis del expediente")
+    magistrado: str = Field(description="Magistrado asignado")
+    secretario: str = Field(description="Secretario asignado")
+    sala: str = Field(description="Sala del expediente")
+    encontrado: bool = Field(description="Indica si el expediente fue encontrado en el CSV")
 
 
 # ============================================================================
@@ -334,6 +350,114 @@ def imprimir_resumen(resultados: List[ResultadoExpediente]):
                 print(f"         Resumen: {acuerdo.resumen[:100]}...")
     
     print("\n" + "=" * 80)
+
+
+# ============================================================================
+# FUNCIONES PARA BÚSQUEDA EN CSV
+# ============================================================================
+
+def leer_csv_expedientes(url_csv: str) -> Dict[str, InfoExpedienteCSV]:
+    """
+    Lee el CSV de expedientes directamente desde URL usando pandas
+    
+    Args:
+        url_csv: URL del CSV en GitHub
+    
+    Returns:
+        Dict con Num Expediente (lowercase) como key e InfoExpedienteCSV como value
+    """
+    
+    print(f"📥 Leyendo CSV desde: {url_csv[:80]}...")
+    
+    try:
+        # Leer CSV directamente con pandas desde la URL
+        df = pd.read_csv(url_csv)
+        
+        print(f"✅ CSV leído: {len(df)} expedientes encontrados")
+        
+        # Crear diccionario indexado por Num Expediente (lowercase)
+        expedientes_dict = {}
+        
+        for _, row in df.iterrows():
+            # Obtener valores, reemplazar NaN con strings vacíos
+            num_exp = str(row.get('Num Expediente', '')).strip()
+            
+            if num_exp and num_exp.lower() != 'nan':
+                expediente = InfoExpedienteCSV(
+                    num_expediente=num_exp,
+                    parte_actora=str(row.get('Parte Actora', '')).replace('nan', ''),
+                    parte_demandada=str(row.get('Parte Demandada', '')).replace('nan', ''),
+                    parte_notificada=str(row.get('Parte Notificada', '')).replace('nan', ''),
+                    fecha_actuacion=str(row.get('Fecha de Actuación', '')).replace('nan', ''),
+                    sintesis=str(row.get('Síntesis', '')).replace('nan', ''),
+                    magistrado=str(row.get('Magistrado', '')).replace('nan', ''),
+                    secretario=str(row.get('Secretario', '')).replace('nan', ''),
+                    sala=str(row.get('Sala', '')).replace('nan', ''),
+                    encontrado=True
+                )
+                
+                # Usar lowercase para búsqueda case-insensitive
+                expedientes_dict[num_exp.lower()] = expediente
+        
+        print(f"✅ Diccionario creado con {len(expedientes_dict)} expedientes")
+        return expedientes_dict
+                    
+    except Exception as e:
+        print(f"❌ Error leyendo CSV: {str(e)}")
+        raise
+
+
+async def buscar_expedientes_en_csv(
+    ids_expedientes: List[str],
+    url_csv: str
+) -> List[InfoExpedienteCSV]:
+    """
+    Busca lista de expedientes en el CSV
+    
+    Args:
+        ids_expedientes: Lista de IDs a buscar
+        url_csv: URL del CSV
+    
+    Returns:
+        Lista de InfoExpedienteCSV (encontrado=True si existe, False con campos vacíos si no)
+    """
+    
+    print(f"\n🔍 Buscando {len(ids_expedientes)} expedientes en CSV...")
+    
+    # Leer CSV y crear diccionario
+    expedientes_dict = leer_csv_expedientes(url_csv)
+    
+    # Buscar cada expediente
+    resultados = []
+    
+    for id_expediente in ids_expedientes:
+        id_lower = id_expediente.strip().lower()
+        
+        if id_lower in expedientes_dict:
+            # Expediente encontrado
+            expediente = expedientes_dict[id_lower]
+            print(f"   ✅ Encontrado: {id_expediente}")
+            resultados.append(expediente)
+        else:
+            # Expediente no encontrado - retornar con encontrado=False y campos vacíos
+            print(f"   ❌ No encontrado: {id_expediente}")
+            expediente_vacio = InfoExpedienteCSV(
+                num_expediente=id_expediente,
+                parte_actora="",
+                parte_demandada="",
+                parte_notificada="",
+                fecha_actuacion="",
+                sintesis="",
+                magistrado="",
+                secretario="",
+                sala="",
+                encontrado=False
+            )
+            resultados.append(expediente_vacio)
+    
+    print(f"✅ Búsqueda completada: {sum(1 for r in resultados if r.encontrado)}/{len(ids_expedientes)} encontrados\n")
+    
+    return resultados
 
 
 # ============================================================================
